@@ -1,6 +1,8 @@
 # WebGL in Entry
 WebGL in Entry는 엔트리에서 WebGL API를 사용할 수 있도록 만들어진 비공식 블록입니다.
 
+![현재 사용 가능한 WebGL 블록](./assets/all_blocks.png)
+
 엔트리 캔버스 위에 독립적인 WebGL 캔버스를 생성하는 방식을 사용합니다.
 
 또한 WebGL 캔버스에 `pointer-events: none`을 적용하여 WebGL 캔버스가 엔트리의 마우스 클릭을 방해하지 않도록 했습니다.
