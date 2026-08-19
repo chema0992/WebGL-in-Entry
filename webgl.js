@@ -1,0 +1,733 @@
+// ==UserScript==
+// @name         엔트리 WebGL 비공식 블록 확장
+// @namespace    http://tampermonkey.net/
+// @version      1.5
+// @description  엔트리 작품 만들기 및 상세 페이지에서 Raw WebGL 블록을 사용할 수 있게 해줍니다.
+// @author       Entry User
+// @match        *://playentry.org/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    function injectWebGLBlocks() {
+
+        const initWebGL = setInterval(() => {
+            let targetWindow = window;
+            let isIframe = false;
+
+            const iframe = document.querySelector('iframe.project_iframe') || document.querySelector('iframe');
+            if (iframe && iframe.contentWindow && iframe.contentWindow.Entry) {
+                targetWindow = iframe.contentWindow;
+                isIframe = true;
+            }
+
+            const Entry = targetWindow.Entry;
+            const EntryStatic = targetWindow.EntryStatic;
+
+            if (!Entry || !Entry.block) return;
+
+            if (!isIframe) {
+                if (!Entry.playground || !Entry.playground.mainWorkspace || !Entry.playground.blockMenu) {
+                    return;
+                }
+            }
+
+            clearInterval(initWebGL);
+            console.log('[WebGL Extension] 엔트리 엔진 감지됨! 안전하게 블록 주입 시작 (isIframe:', isIframe, ')');
+
+            if (isIframe) {
+                if (!Entry.playground) Entry.playground = {};
+                if (!Entry.playground.mainWorkspace) {
+                    Entry.playground.mainWorkspace = {
+                        blockMenu: { _generateCategoryView: () => {} },
+                        syncCode: () => {}
+                    };
+                }
+                if (!Entry.playground.blockMenu) {
+                    Entry.playground.blockMenu = {
+                        _categoryData: [],
+                        _generateCategoryCode: () => {}
+                    };
+                }
+                if (!targetWindow.$) {
+                    targetWindow.$ = () => { return { length: 0, append: () => {}, css: () => {}, attr: () => {} } };
+                }
+            }
+
+            if (!targetWindow.__ENTRY_WEBGL__) {
+                targetWindow.__ENTRY_WEBGL__ = {
+                    gl: null,
+                    canvas: null,
+                    programs: {},
+                    buffers: {},
+                    shaders: {},
+                    uniforms: {},
+                    textures: {}
+                };
+            }
+
+            const addBlock = (blockname, template, color, params, _class, func, skeleton = 'basic') => {
+                Entry.block[blockname] = {
+                    color: color.color,
+                    outerLine: color.outerline,
+                    fontColor: color.fontColor || '#ffffff',
+                    skeleton: skeleton,
+                    statement: [],
+                    params: params.params,
+                    events: {},
+                    def: {
+                        params: params.def,
+                        type: blockname
+                    },
+                    paramsKeyMap: params.map,
+                    class: _class ? _class : 'default',
+                    func: func,
+                    template: template
+                };
+            };
+
+            // [추가 기능] WebGL 컨텍스트 및 캔버스 초기화(삭제) 블록
+            addBlock(
+                'webgl_destroy_context',
+                'WebGL 캔버스 및 데이터 모두 지우기 %1',
+                { color: '#E74C3C', outerLine: '#C0392B' }, // 삭제 기능이므로 눈에 띄는 붉은색 계열 적용
+                { params: [{ type: 'Indicator', img: '', size: 11 }], def: [null], map: {} },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (state) {
+                        // WebGL 메모리 반환
+                        if (state.gl) {
+                            const loseCtx = state.gl.getExtension('WEBGL_lose_context');
+                            if (loseCtx) loseCtx.loseContext();
+                        }
+                        // 캔버스 DOM 요소 제거
+                        if (state.canvas && state.canvas.parentNode) {
+                            state.canvas.parentNode.removeChild(state.canvas);
+                        }
+                        // 상태 객체 초기화
+                        targetWindow.__ENTRY_WEBGL__ = {
+                            gl: null,
+                            canvas: null,
+                            programs: {},
+                            buffers: {},
+                            shaders: {},
+                            uniforms: {},
+                            textures: {}
+                        };
+                        console.log('[WebGL] 캔버스 및 모든 초기화 데이터 삭제 완료');
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_init_context',
+                'WebGL 캔버스 시작하기 %1',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                { params: [{ type: 'Indicator', img: '', size: 11 }], def: [null], map: {} },
+                'text',
+                (sprite, script) => {
+                    if (!targetWindow.__ENTRY_WEBGL__.canvas) {
+                        const entryCanvas = targetWindow.document.querySelector('.entryCanvasWorkspace canvas') ||
+                                            (Entry.stage && (Entry.stage.canvas.canvas || Entry.stage.canvas));
+
+                        if (entryCanvas) {
+                            const wrapper = entryCanvas.parentElement;
+                            const glCanvas = targetWindow.document.createElement('canvas');
+
+                            glCanvas.width = entryCanvas.width;
+                            glCanvas.height = entryCanvas.height;
+
+                            glCanvas.style.position = 'absolute';
+                            glCanvas.style.top = entryCanvas.style.top || '0px';
+                            glCanvas.style.left = entryCanvas.style.left || '0px';
+                            glCanvas.style.width = '100%';
+                            glCanvas.style.height = '100%';
+                            glCanvas.style.pointerEvents = 'none';
+                            glCanvas.style.zIndex = '100';
+
+                            wrapper.appendChild(glCanvas);
+                            const gl = glCanvas.getContext('webgl', { alpha: true });
+
+                            targetWindow.__ENTRY_WEBGL__.canvas = glCanvas;
+                            targetWindow.__ENTRY_WEBGL__.gl = gl;
+                            console.log('[WebGL] 캔버스 초기화 완료');
+                        }
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_clear_color',
+                '화면 닦기 색상 R:%1 G:%2 B:%3 A:%4 %5',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['0.0'] }, { type: 'text', params: ['0.0'] },
+                        { type: 'text', params: ['0.0'] }, { type: 'text', params: ['0.0'] }, null
+                    ],
+                    map: { R: 0, G: 1, B: 2, A: 3 }
+                },
+                'text',
+                (sprite, script) => {
+                    const gl = targetWindow.__ENTRY_WEBGL__.gl;
+                    if (gl) {
+                        const r = parseFloat(script.getNumberValue('R'));
+                        const g = parseFloat(script.getNumberValue('G'));
+                        const b = parseFloat(script.getNumberValue('B'));
+                        const a = parseFloat(script.getNumberValue('A'));
+                        gl.clearColor(r, g, b, a);
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_clear',
+                '화면 닦기 %1',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                { params: [{ type: 'Indicator', img: '', size: 11 }], def: [null], map: {} },
+                'text',
+                (sprite, script) => {
+                    const gl = targetWindow.__ENTRY_WEBGL__.gl;
+                    if (gl) gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_create_program_glsl',
+                'WebGL 프로그램 %1 생성 (버텍스 GLSL: %2 , 프래그먼트 GLSL: %3)',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['my_program'] },
+                        { type: 'text', params: ['attribute vec2 a_position;\nvoid main() {\n  gl_Position = vec4(a_position, 0.0, 1.0);\n}'] },
+                        { type: 'text', params: ['precision mediump float;\nvoid main() {\n  gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);\n}'] },
+                        null
+                    ],
+                    map: { PROG_NAME: 0, VS_SOURCE: 1, FS_SOURCE: 2 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const progName = script.getStringValue('PROG_NAME');
+                    const vsSource = script.getStringValue('VS_SOURCE');
+                    const fsSource = script.getStringValue('FS_SOURCE');
+
+                    const compileShader = (type, source) => {
+                        const shader = gl.createShader(type);
+                        gl.shaderSource(shader, source);
+                        gl.compileShader(shader);
+                        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                            console.error('[WebGL Shader Error]:', gl.getShaderInfoLog(shader));
+                            return null;
+                        }
+                        return shader;
+                    };
+
+                    const vs = compileShader(gl.VERTEX_SHADER, vsSource);
+                    const fs = compileShader(gl.FRAGMENT_SHADER, fsSource);
+                    if (!vs || !fs) return script.callReturn();
+
+                    const program = gl.createProgram();
+                    gl.attachShader(program, vs);
+                    gl.attachShader(program, fs);
+                    gl.linkProgram(program);
+
+                    if (gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                        state.programs[progName] = program;
+                        console.log(`[WebGL] 프로그램 '${progName}' 링킹 성공`);
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_create_buffer_data',
+                '버퍼 %1 에 정점 데이터 [%2] 설정 %3',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['pos_buffer'] },
+                        { type: 'text', params: ['-0.5, -0.5,  0.5, -0.5,  0.0, 0.5'] }, null
+                    ],
+                    map: { BUF_NAME: 0, DATA_STR: 1 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const bufName = script.getStringValue('BUF_NAME');
+                    const rawArray = script.getStringValue('DATA_STR').split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+
+                    let buffer = state.buffers[bufName] || gl.createBuffer();
+                    state.buffers[bufName] = buffer;
+
+                    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+                    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(rawArray), gl.STATIC_DRAW);
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_bind_attribute',
+                '프로그램 %1 의 %2 특성에 버퍼 %3 연결 (차원: %4) %5',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['my_program'] }, { type: 'text', params: ['a_position'] },
+                        { type: 'text', params: ['pos_buffer'] }, { type: 'text', params: ['2'] }, null
+                    ],
+                    map: { PROG_NAME: 0, ATTR_NAME: 1, BUF_NAME: 2, SIZE: 3 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const program = state.programs[script.getStringValue('PROG_NAME')];
+                    const buffer = state.buffers[script.getStringValue('BUF_NAME')];
+
+                    if (program && buffer) {
+                        gl.useProgram(program);
+                        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+                        const loc = gl.getAttribLocation(program, script.getStringValue('ATTR_NAME'));
+                        if (loc !== -1) {
+                            gl.vertexAttribPointer(loc, script.getNumberValue('SIZE') || 2, gl.FLOAT, false, 0, 0);
+                            gl.enableVertexAttribArray(loc);
+                        }
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_draw_arrays',
+                '프로그램 %1 로 그리기 (모드: %2, 시작: %3, 정점 수: %4) %5',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['my_program'] }, { type: 'text', params: ['TRIANGLES'] },
+                        { type: 'text', params: ['0'] }, { type: 'text', params: ['3'] }, null
+                    ],
+                    map: { PROG_NAME: 0, MODE: 1, FIRST: 2, COUNT: 3 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const program = state.programs[script.getStringValue('PROG_NAME')];
+                    const modeStr = script.getStringValue('MODE').toUpperCase().trim();
+
+                    if (program) {
+                        gl.useProgram(program);
+                        let mode = gl.TRIANGLES;
+                        if (modeStr === 'POINTS') mode = gl.POINTS;
+                        else if (modeStr === 'LINES') mode = gl.LINES;
+                        else if (modeStr === 'LINE_STRIP') mode = gl.LINE_STRIP;
+                        else if (modeStr === 'LINE_LOOP') mode = gl.LINE_LOOP;
+                        else if (modeStr === 'TRIANGLE_STRIP') mode = gl.TRIANGLE_STRIP;
+                        else if (modeStr === 'TRIANGLE_FAN') mode = gl.TRIANGLE_FAN;
+
+                        gl.drawArrays(mode, script.getNumberValue('FIRST') || 0, script.getNumberValue('COUNT') || 3);
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_create_index_buffer_data',
+                '인덱스 버퍼 %1 에 데이터 [%2] 설정 %3',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['index_buffer'] },
+                        { type: 'text', params: ['0, 1, 2'] }, null
+                    ],
+                    map: { BUF_NAME: 0, DATA_STR: 1 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const bufName = script.getStringValue('BUF_NAME');
+                    const rawArray = script.getStringValue('DATA_STR').split(',').map(v => parseInt(v.trim(), 10)).filter(v => !isNaN(v));
+
+                    let buffer = state.buffers[bufName] || gl.createBuffer();
+                    state.buffers[bufName] = buffer;
+
+                    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
+                    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(rawArray), gl.STATIC_DRAW);
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_bind_index_buffer',
+                '인덱스 버퍼 %1 연결 %2',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['index_buffer'] }, null
+                    ],
+                    map: { BUF_NAME: 0 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const buffer = state.buffers[script.getStringValue('BUF_NAME')];
+
+                    if (buffer) {
+                        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_draw_elements',
+                '프로그램 %1 로 인덱스 그리기 (모드: %2, 정점 수: %3, 시작: %4) %5',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['my_program'] }, { type: 'text', params: ['TRIANGLES'] },
+                        { type: 'text', params: ['3'] }, { type: 'text', params: ['0'] }, null
+                    ],
+                    map: { PROG_NAME: 0, MODE: 1, COUNT: 2, OFFSET: 3 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const program = state.programs[script.getStringValue('PROG_NAME')];
+                    const modeStr = script.getStringValue('MODE').toUpperCase().trim();
+
+                    if (program) {
+                        gl.useProgram(program);
+                        let mode = gl.TRIANGLES;
+                        if (modeStr === 'POINTS') mode = gl.POINTS;
+                        else if (modeStr === 'LINES') mode = gl.LINES;
+                        else if (modeStr === 'LINE_STRIP') mode = gl.LINE_STRIP;
+                        else if (modeStr === 'LINE_LOOP') mode = gl.LINE_LOOP;
+                        else if (modeStr === 'TRIANGLE_STRIP') mode = gl.TRIANGLE_STRIP;
+                        else if (modeStr === 'TRIANGLE_FAN') mode = gl.TRIANGLE_FAN;
+
+                        const count = script.getNumberValue('COUNT') || 3;
+                        const offset = script.getNumberValue('OFFSET') || 0;
+
+                        gl.drawElements(mode, count, gl.UNSIGNED_SHORT, offset);
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_set_uniform',
+                '프로그램 %1 의 유니폼 %2 에 값 [%3] 설정 (타입: %4) %5',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['my_program'] }, { type: 'text', params: ['u_color'] },
+                        { type: 'text', params: ['1.0, 0.0, 0.0, 1.0'] }, { type: 'text', params: ['4f'] }, null
+                    ],
+                    map: { PROG_NAME: 0, UNIFORM_NAME: 1, VALUE_STR: 2, TYPE: 3 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const progName = script.getStringValue('PROG_NAME');
+                    const uniformName = script.getStringValue('UNIFORM_NAME');
+                    const valueStr = script.getStringValue('VALUE_STR');
+                    const type = script.getStringValue('TYPE').toLowerCase().trim();
+
+                    const program = state.programs[progName];
+                    if (program) {
+                        gl.useProgram(program);
+
+                        const cacheKey = `${progName}_${uniformName}`;
+                        let loc = state.uniforms[cacheKey];
+                        if (loc === undefined) {
+                            loc = gl.getUniformLocation(program, uniformName);
+                            state.uniforms[cacheKey] = loc;
+                        }
+
+                        if (loc !== null) {
+                            const rawArray = valueStr.split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v));
+                            if (type === '1f') gl.uniform1f(loc, rawArray[0] || 0);
+                            else if (type === '2f') gl.uniform2f(loc, rawArray[0] || 0, rawArray[1] || 0);
+                            else if (type === '3f') gl.uniform3f(loc, rawArray[0] || 0, rawArray[1] || 0, rawArray[2] || 0);
+                            else if (type === '4f') gl.uniform4f(loc, rawArray[0] || 0, rawArray[1] || 0, rawArray[2] || 0, rawArray[3] || 0);
+                            else if (type === '1i') gl.uniform1i(loc, Math.floor(rawArray[0] || 0));
+                            else if (type === 'mat4') gl.uniformMatrix4fv(loc, false, new Float32Array(rawArray));
+                        }
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_toggle_depth_test',
+                '깊이 테스트 %1 %2',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        {
+                            type: 'Dropdown',
+                            options: [['켜기 (ON)', 'ON'], ['끄기 (OFF)', 'OFF']],
+                            value: 'ON',
+                            fontSize: 11,
+                            bgColor: '#732D91',
+                            arrowColor: '#FFFFFF'
+                        },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [null, null],
+                    map: { STATE: 0 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const toggle = script.getField('STATE', script);
+
+                    if (toggle === 'ON') {
+                        gl.enable(gl.DEPTH_TEST);
+                    } else {
+                        gl.disable(gl.DEPTH_TEST);
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_load_texture',
+                '텍스처 %1 생성 (URL: %2) %3',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['tex_0'] },
+                        { type: 'text', params: ['https://playentry.org/img/assets/entry_logo.png'] }, null
+                    ],
+                    map: { TEX_NAME: 0, URL: 1 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const texName = script.getStringValue('TEX_NAME');
+                    const url = script.getStringValue('URL');
+
+                    if (!state.textures) state.textures = {};
+
+                    let texture = state.textures[texName];
+                    if (!texture) {
+                        texture = gl.createTexture();
+                        state.textures[texName] = texture;
+                    }
+
+                    gl.bindTexture(gl.TEXTURE_2D, texture);
+
+                    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 255, 255]));
+
+                    const image = new Image();
+                    image.crossOrigin = 'anonymous';
+                    image.onload = () => {
+                        gl.bindTexture(gl.TEXTURE_2D, texture);
+                        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+                        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+
+                        const isPowerOf2 = (val) => (val & (val - 1)) === 0;
+                        if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+                            gl.generateMipmap(gl.TEXTURE_2D);
+                        } else {
+                            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+                            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                        }
+                    };
+                    image.src = url;
+
+                    return script.callReturn();
+                }
+            );
+
+            addBlock(
+                'webgl_bind_texture',
+                '프로그램 %1 의 샘플러 %2 에 텍스처 %3 연결 (유닛: %4) %5',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['my_program'] }, { type: 'text', params: ['u_sampler'] },
+                        { type: 'text', params: ['tex_0'] }, { type: 'text', params: ['0'] }, null
+                    ],
+                    map: { PROG_NAME: 0, UNIFORM_NAME: 1, TEX_NAME: 2, UNIT: 3 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const progName = script.getStringValue('PROG_NAME');
+                    const uniformName = script.getStringValue('UNIFORM_NAME');
+                    const texName = script.getStringValue('TEX_NAME');
+                    const unit = Math.max(0, parseInt(script.getNumberValue('UNIT') || 0, 10));
+
+                    const program = state.programs[progName];
+                    const texture = state.textures ? state.textures[texName] : null;
+
+                    if (program && texture) {
+                        gl.useProgram(program);
+                        gl.activeTexture(gl.TEXTURE0 + unit);
+                        gl.bindTexture(gl.TEXTURE_2D, texture);
+
+                        const cacheKey = `${progName}_${uniformName}`;
+                        let loc = state.uniforms[cacheKey];
+                        if (loc === undefined) {
+                            loc = gl.getUniformLocation(program, uniformName);
+                            state.uniforms[cacheKey] = loc;
+                        }
+
+                        if (loc !== null) {
+                            gl.uniform1i(loc, unit);
+                        }
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            const webglBlocks = [
+                'webgl_destroy_context', // 새로 추가된 초기화 블록 등록
+                'webgl_init_context', 'webgl_clear_color', 'webgl_clear',
+                'webgl_create_program_glsl', 'webgl_create_buffer_data',
+                'webgl_bind_attribute', 'webgl_draw_arrays',
+                'webgl_create_index_buffer_data', 'webgl_bind_index_buffer', 'webgl_draw_elements',
+                'webgl_set_uniform', 'webgl_toggle_depth_test',
+                'webgl_load_texture', 'webgl_bind_texture'
+            ];
+
+            if (EntryStatic && typeof EntryStatic.getAllBlocks === 'function') {
+                const originalGetAllBlocks = EntryStatic.getAllBlocks;
+                EntryStatic.getAllBlocks = () => {
+                    const blocks = originalGetAllBlocks();
+                    const hasCustom = blocks.find(c => c.category === 'WebGL');
+                    if (!hasCustom) {
+                        blocks.push({ category: 'WebGL', blocks: webglBlocks });
+                    }
+                    return blocks;
+                };
+            }
+
+            if (!isIframe && targetWindow.$) {
+                try {
+                    const $ = targetWindow.$;
+                    Entry.playground.mainWorkspace.blockMenu._generateCategoryView([
+                        { category: 'start', visible: true }, { category: 'flow', visible: true },
+                        { category: 'moving', visible: true }, { category: 'looks', visible: true },
+                        { category: 'brush', visible: true }, { category: 'text', visible: true },
+                        { category: 'sound', visible: true }, { category: 'judgement', visible: true },
+                        { category: 'calc', visible: true }, { category: 'variable', visible: true },
+                        { category: 'func', visible: true }, { category: 'analysis', visible: true },
+                        { category: 'ai_utilize', visible: true }, { category: 'expansion', visible: true },
+                        { category: 'arduino', visible: false },
+                        { category: 'WebGL', visible: true }
+                    ]);
+
+                    $('.entryCategoryElementWorkspace').not('#entryCategorytext').attr('class', 'entryCategoryElementWorkspace');
+
+                    Entry.playground.blockMenu._categoryData = EntryStatic.getAllBlocks();
+                    Entry.playground.blockMenu._generateCategoryCode('WebGL');
+
+                    $('#entryCategoryWebGL')[0].innerText = 'WebGL 3D';
+                    $('#entryCategoryWebGL').css({ 'background-color': '#8E44AD', 'color': '#ffffff' });
+                } catch (e) {
+                    console.warn('[WebGL Extension] 카테고리 UI 렌더링 중 경고 (무시해도 됨):', e);
+                }
+            }
+
+            console.log('[WebGL Extension] 유니폼, 깊이 테스트, 인덱스 버퍼, 텍스처 포함 모든 WebGL 블록 주입 완료!');
+        }, 500);
+    }
+
+    const script = document.createElement('script');
+    script.appendChild(document.createTextNode('(' + injectWebGLBlocks.toString() + ')();'));
+    (document.body || document.head || document.documentElement).appendChild(script);
+
+})();
