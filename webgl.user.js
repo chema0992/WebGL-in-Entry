@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         엔트리 WebGL 비공식 블록 확장
 // @namespace    http://tampermonkey.net/
-// @version      1.7
+// @version      1.8
 // @description  엔트리 작품 만들기 및 상세 페이지에서 Raw WebGL 블록을 사용할 수 있게 해줍니다.
 // @author       Entry User
 // @match        *://playentry.org/*
@@ -776,7 +776,7 @@
                     return script.callReturn();
                 }
             );
-                    // [추가 기능] 자동 시간 유니폼(u_time) 업데이트 블록
+
             addBlock(
                 'webgl_set_time_uniform',
                 '프로그램 %1 의 유니폼 %2 에 현재 시간(u_time) 설정 %3',
@@ -820,15 +820,93 @@
                     return script.callReturn();
                 }
             );
+            // [추가 기능] 3D 변환 행렬(Model Matrix) 생성 블록 (값 블록)
+            addBlock(
+                'webgl_make_transform_matrix',
+                '이동 X:%1 Y:%2 Z:%3 회전 X:%4 Y:%5 Z:%6 크기 X:%7 Y:%8 Z:%9 변환 행렬',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' }
+                    ],
+                    def: [
+                        { type: 'text', params: ['0'] }, { type: 'text', params: ['0'] }, { type: 'text', params: ['0'] }, // 이동
+                        { type: 'text', params: ['0'] }, { type: 'text', params: ['0'] }, { type: 'text', params: ['0'] }, // 회전
+                        { type: 'text', params: ['1'] }, { type: 'text', params: ['1'] }, { type: 'text', params: ['1'] }  // 크기
+                    ],
+                    map: { TX: 0, TY: 1, TZ: 2, RX: 3, RY: 4, RZ: 5, SX: 6, SY: 7, SZ: 8 }
+                },
+                'text',
+                (sprite, script) => {
+                    const tx = parseFloat(script.getNumberValue('TX') || 0);
+                    const ty = parseFloat(script.getNumberValue('TY') || 0);
+                    const tz = parseFloat(script.getNumberValue('TZ') || 0);
+
+                    // 각도를 라디안으로 변환
+                    const rx = parseFloat(script.getNumberValue('RX') || 0) * Math.PI / 180;
+                    const ry = parseFloat(script.getNumberValue('RY') || 0) * Math.PI / 180;
+                    const rz = parseFloat(script.getNumberValue('RZ') || 0) * Math.PI / 180;
+
+                    const sx = parseFloat(script.getNumberValue('SX') || 1);
+                    const sy = parseFloat(script.getNumberValue('SY') || 1);
+                    const sz = parseFloat(script.getNumberValue('SZ') || 1);
+
+                    // 4x4 행렬 곱셈 (Column-major)
+                    const multiply = (a, b) => {
+                        let c = new Array(16);
+                        for(let i=0; i<4; i++) {
+                            for(let j=0; j<4; j++) {
+                                c[i*4 + j] = a[0*4 + j]*b[i*4 + 0] + a[1*4 + j]*b[i*4 + 1] +
+                                             a[2*4 + j]*b[i*4 + 2] + a[3*4 + j]*b[i*4 + 3];
+                            }
+                        }
+                        return c;
+                    };
+
+                    const identity = () => [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+
+                    let matT = identity();
+                    matT[12] = tx; matT[13] = ty; matT[14] = tz;
+
+                    let matS = identity();
+                    matS[0] = sx; matS[5] = sy; matS[10] = sz;
+
+                    let matRx = identity();
+                    matRx[5] = Math.cos(rx); matRx[6] = Math.sin(rx);
+                    matRx[9] = -Math.sin(rx); matRx[10] = Math.cos(rx);
+
+                    let matRy = identity();
+                    matRy[0] = Math.cos(ry); matRy[2] = -Math.sin(ry);
+                    matRy[8] = Math.sin(ry); matRy[10] = Math.cos(ry);
+
+                    let matRz = identity();
+                    matRz[0] = Math.cos(rz); matRz[1] = Math.sin(rz);
+                    matRz[4] = -Math.sin(rz); matRz[5] = Math.cos(rz);
+
+                    // 이동 * Z회전 * Y회전 * X회전 * 크기 순으로 결합 (TRS)
+                    let out = multiply(matT, matRz);
+                    out = multiply(out, matRy);
+                    out = multiply(out, matRx);
+                    out = multiply(out, matS);
+
+                    // 0에 가까운 부동소수점 오차 제거 및 쉼표로 연결하여 반환
+                    return out.map(v => (Math.abs(v) < 1e-6 ? 0 : v).toFixed(4)).join(', ');
+                },
+                'basic_string_field' // 값을 반환하는 둥근 블록으로 설정
+            );
 
             const webglBlocks = [
-                'webgl_destroy_context', // 새로 추가된 초기화 블록 등록
+                'webgl_destroy_context',
                 'webgl_init_context', 'webgl_clear_color', 'webgl_clear',
                 'webgl_create_program_glsl', 'webgl_create_buffer_data',
                 'webgl_bind_attribute', 'webgl_draw_arrays',
                 'webgl_create_index_buffer_data', 'webgl_bind_index_buffer', 'webgl_draw_elements',
-                'webgl_set_uniform', 'webgl_set_time_uniform', 'webgl_toggle_depth_test', // 여기에 추가됨
-                'webgl_load_texture', 'webgl_bind_texture'
+                'webgl_set_uniform', 'webgl_set_time_uniform', 'webgl_toggle_depth_test',
+                'webgl_load_texture', 'webgl_bind_texture',
+                'webgl_create_framebuffer', 'webgl_bind_framebuffer', // 누락되었던 프레임버퍼 블록 추가
+                'webgl_make_transform_matrix' // 새로 생성한 행렬 블록 추가
             ];
 
             if (EntryStatic && typeof EntryStatic.getAllBlocks === 'function') {
