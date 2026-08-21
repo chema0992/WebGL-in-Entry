@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         엔트리 WebGL 비공식 블록 확장
+// @name         엔트리 WebGL 비공식 블록 확장 TEST
 // @namespace    http://tampermonkey.net/
-// @version      1.9
+// @version      2.0
 // @description  엔트리 작품 만들기 및 상세 페이지에서 Raw WebGL 블록을 사용할 수 있게 해줍니다.
 // @author       Entry User
 // @match        *://playentry.org/*
@@ -897,7 +897,7 @@
                 'basic_string_field' // 값을 반환하는 둥근 블록으로 설정
             );
 
-            // [추가 기능] 원근(Perspective) 투영 행렬 생성 블록 (값 블록)
+
             addBlock(
                 'webgl_make_perspective_matrix',
                 '원근 투영 시야각(FOV):%1 비율(W/H):%2 최소거리:%3 최대거리:%4',
@@ -942,6 +942,83 @@
                 'basic_string_field' // 값을 반환하는 둥근 블록
             );
 
+            // [추가 기능] 투명도(Blending) 설정 블록
+            addBlock(
+                'webgl_toggle_blend',
+                '투명도(블렌딩) %1 %2',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        {
+                            type: 'Dropdown',
+                            options: [['켜기 (ON)', 'ON'], ['끄기 (OFF)', 'OFF']],
+                            value: 'ON',
+                            fontSize: 11,
+                            bgColor: '#732D91',
+                            arrowColor: '#FFFFFF'
+                        },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [null, null],
+                    map: { STATE: 0 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const toggle = script.getField('STATE', script);
+
+                    if (toggle === 'ON') {
+                        gl.enable(gl.BLEND);
+                        gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+                    } else {
+                        gl.disable(gl.BLEND);
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            // [추가 기능] 뒷면 숨기기(Culling) 설정 블록
+            addBlock(
+                'webgl_toggle_cull_face',
+                '뒷면 숨기기(컬링) %1 %2',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        {
+                            type: 'Dropdown',
+                            options: [['켜기 (ON)', 'ON'], ['끄기 (OFF)', 'OFF']],
+                            value: 'ON',
+                            fontSize: 11,
+                            bgColor: '#732D91',
+                            arrowColor: '#FFFFFF'
+                        },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [null, null],
+                    map: { STATE: 0 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const toggle = script.getField('STATE', script);
+
+                    if (toggle === 'ON') {
+                        gl.enable(gl.CULL_FACE);
+                        // 기본적으로 뒷면(BACK)을 컬링하도록 설정합니다.
+                        gl.cullFace(gl.BACK);
+                    } else {
+                        gl.disable(gl.CULL_FACE);
+                    }
+                    return script.callReturn();
+                }
+            );
+
             const webglBlocks = [
                 'webgl_destroy_context',
                 'webgl_init_context', 'webgl_clear_color', 'webgl_clear',
@@ -952,7 +1029,9 @@
                 'webgl_load_texture', 'webgl_bind_texture',
                 'webgl_create_framebuffer', 'webgl_bind_framebuffer',
                 'webgl_make_transform_matrix',
-                'webgl_make_perspective_matrix' // <-- 추가된 원근 투영 행렬 블록
+                'webgl_make_perspective_matrix',
+                'webgl_toggle_blend',       // <-- 추가된 블렌딩 블록
+                'webgl_toggle_cull_face'    // <-- 추가된 컬링 블록
             ];
 
             if (EntryStatic && typeof EntryStatic.getAllBlocks === 'function') {
