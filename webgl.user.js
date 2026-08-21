@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         엔트리 WebGL 비공식 블록 확장
 // @namespace    http://tampermonkey.net/
-// @version      1.8
+// @version      1.9
 // @description  엔트리 작품 만들기 및 상세 페이지에서 Raw WebGL 블록을 사용할 수 있게 해줍니다.
 // @author       Entry User
 // @match        *://playentry.org/*
@@ -820,7 +820,7 @@
                     return script.callReturn();
                 }
             );
-            // [추가 기능] 3D 변환 행렬(Model Matrix) 생성 블록 (값 블록)
+
             addBlock(
                 'webgl_make_transform_matrix',
                 '이동 X:%1 Y:%2 Z:%3 회전 X:%4 Y:%5 Z:%6 크기 X:%7 Y:%8 Z:%9 변환 행렬',
@@ -897,6 +897,51 @@
                 'basic_string_field' // 값을 반환하는 둥근 블록으로 설정
             );
 
+            // [추가 기능] 원근(Perspective) 투영 행렬 생성 블록 (값 블록)
+            addBlock(
+                'webgl_make_perspective_matrix',
+                '원근 투영 시야각(FOV):%1 비율(W/H):%2 최소거리:%3 최대거리:%4',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' }
+                    ],
+                    def: [
+                        { type: 'text', params: ['60'] }, // FOV (도 단위)
+                        { type: 'text', params: ['1.0'] }, // 화면 비율 (보통 캔버스 가로/세로)
+                        { type: 'text', params: ['0.1'] }, // Near (가장 가까이 보이는 거리)
+                        { type: 'text', params: ['100.0'] } // Far (가장 멀리 보이는 거리)
+                    ],
+                    map: { FOV: 0, ASPECT: 1, NEAR: 2, FAR: 3 }
+                },
+                'text',
+                (sprite, script) => {
+                    const fov = parseFloat(script.getNumberValue('FOV') || 60);
+                    const aspect = parseFloat(script.getNumberValue('ASPECT') || 1.0);
+                    const near = parseFloat(script.getNumberValue('NEAR') || 0.1);
+                    const far = parseFloat(script.getNumberValue('FAR') || 100.0);
+
+                    // 각도를 라디안으로 변환
+                    const fovInRad = fov * Math.PI / 180.0;
+
+                    // 원근 투영 행렬 계산 공식 적용
+                    const f = 1.0 / Math.tan(fovInRad / 2.0);
+                    const rangeInv = 1.0 / (near - far);
+
+                    let out = new Array(16).fill(0);
+                    out[0] = f / aspect;
+                    out[5] = f;
+                    out[10] = (near + far) * rangeInv;
+                    out[11] = -1.0;
+                    out[14] = near * far * rangeInv * 2.0;
+
+                    // 0에 가까운 부동소수점 오차 제거 및 쉼표로 연결하여 텍스트로 반환
+                    return out.map(v => (Math.abs(v) < 1e-6 ? 0 : v).toFixed(4)).join(', ');
+                },
+                'basic_string_field' // 값을 반환하는 둥근 블록
+            );
+
             const webglBlocks = [
                 'webgl_destroy_context',
                 'webgl_init_context', 'webgl_clear_color', 'webgl_clear',
@@ -905,8 +950,9 @@
                 'webgl_create_index_buffer_data', 'webgl_bind_index_buffer', 'webgl_draw_elements',
                 'webgl_set_uniform', 'webgl_set_time_uniform', 'webgl_toggle_depth_test',
                 'webgl_load_texture', 'webgl_bind_texture',
-                'webgl_create_framebuffer', 'webgl_bind_framebuffer', // 누락되었던 프레임버퍼 블록 추가
-                'webgl_make_transform_matrix' // 새로 생성한 행렬 블록 추가
+                'webgl_create_framebuffer', 'webgl_bind_framebuffer',
+                'webgl_make_transform_matrix',
+                'webgl_make_perspective_matrix' // <-- 추가된 원근 투영 행렬 블록
             ];
 
             if (EntryStatic && typeof EntryStatic.getAllBlocks === 'function') {
