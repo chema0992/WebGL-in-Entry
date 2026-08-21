@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         엔트리 WebGL 비공식 블록 확장
 // @namespace    http://tampermonkey.net/
-// @version      1.5
+// @version      1.7
 // @description  엔트리 작품 만들기 및 상세 페이지에서 Raw WebGL 블록을 사용할 수 있게 해줍니다.
 // @author       Entry User
 // @match        *://playentry.org/*
@@ -64,7 +64,8 @@
                     buffers: {},
                     shaders: {},
                     uniforms: {},
-                    textures: {}
+                    textures: {},
+                    framebuffers: {} // [추가됨] 프레임버퍼 저장소
                 };
             }
 
@@ -88,26 +89,22 @@
                 };
             };
 
-            // [추가 기능] WebGL 컨텍스트 및 캔버스 초기화(삭제) 블록
             addBlock(
                 'webgl_destroy_context',
                 'WebGL 캔버스 및 데이터 모두 지우기 %1',
-                { color: '#E74C3C', outerLine: '#C0392B' }, // 삭제 기능이므로 눈에 띄는 붉은색 계열 적용
+                { color: '#E74C3C', outerLine: '#C0392B' },
                 { params: [{ type: 'Indicator', img: '', size: 11 }], def: [null], map: {} },
                 'text',
                 (sprite, script) => {
                     const state = targetWindow.__ENTRY_WEBGL__;
                     if (state) {
-                        // WebGL 메모리 반환
                         if (state.gl) {
                             const loseCtx = state.gl.getExtension('WEBGL_lose_context');
                             if (loseCtx) loseCtx.loseContext();
                         }
-                        // 캔버스 DOM 요소 제거
                         if (state.canvas && state.canvas.parentNode) {
                             state.canvas.parentNode.removeChild(state.canvas);
                         }
-                        // 상태 객체 초기화
                         targetWindow.__ENTRY_WEBGL__ = {
                             gl: null,
                             canvas: null,
@@ -115,7 +112,8 @@
                             buffers: {},
                             shaders: {},
                             uniforms: {},
-                            textures: {}
+                            textures: {},
+                            framebuffers: {} // [추가됨] 초기화 시 프레임버퍼도 비움
                         };
                         console.log('[WebGL] 캔버스 및 모든 초기화 데이터 삭제 완료');
                     }
@@ -673,13 +671,163 @@
                 }
             );
 
+            // [추가 기능] 프레임버퍼(Framebuffer) 생성 블록
+            addBlock(
+                'webgl_create_framebuffer',
+                '프레임버퍼 %1 생성 (가로: %2 세로: %3 연결할 텍스처: %4) %5',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['fb_0'] }, { type: 'text', params: ['512'] },
+                        { type: 'text', params: ['512'] }, { type: 'text', params: ['tex_fb_0'] }, null
+                    ],
+                    map: { FB_NAME: 0, WIDTH: 1, HEIGHT: 2, TEX_NAME: 3 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const fbName = script.getStringValue('FB_NAME');
+                    const width = Math.max(1, parseInt(script.getNumberValue('WIDTH') || 512, 10));
+                    const height = Math.max(1, parseInt(script.getNumberValue('HEIGHT') || 512, 10));
+                    const texName = script.getStringValue('TEX_NAME');
+
+                    if (!state.framebuffers) state.framebuffers = {};
+                    if (!state.textures) state.textures = {};
+
+                    // 프레임버퍼 객체 생성 및 바인딩
+                    const fb = gl.createFramebuffer();
+                    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+
+                    // 컬러 어태치먼트로 사용할 빈 텍스처 생성
+                    const tex = gl.createTexture();
+                    gl.bindTexture(gl.TEXTURE_2D, tex);
+                    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+                    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+                    // 프레임버퍼에 텍스처 연결
+                    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+
+                    // 3D 렌더링을 위한 깊이(Depth) 렌더버퍼 생성 및 연결
+                    const depthBuffer = gl.createRenderbuffer();
+                    gl.bindRenderbuffer(gl.RENDERBUFFER, depthBuffer);
+                    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, width, height);
+                    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depthBuffer);
+
+                    // 상태 저장
+                    state.framebuffers[fbName] = { fb: fb, width: width, height: height, depth: depthBuffer };
+                    state.textures[texName] = tex;
+
+                    // 바인딩 해제 (원래 캔버스로 원상복구)
+                    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+                    return script.callReturn();
+                }
+            );
+
+            // [추가 기능] 프레임버퍼 바인딩(사용) 블록
+            addBlock(
+                'webgl_bind_framebuffer',
+                '그리기 화면을 프레임버퍼 %1 (으)로 변경 (기본 캔버스는 "기본" 입력) %2',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['fb_0'] }, null
+                    ],
+                    map: { FB_NAME: 0 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const fbName = script.getStringValue('FB_NAME');
+
+                    // "기본", "", "null" 입력 시 캔버스 화면으로 돌아감
+                    if (fbName === '기본' || fbName === 'null' || fbName === '') {
+                        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+                        if (state.canvas) {
+                            // 원래 캔버스 크기로 뷰포트 복원
+                            gl.viewport(0, 0, state.canvas.width, state.canvas.height);
+                        }
+                    } else {
+                        const fbObj = state.framebuffers ? state.framebuffers[fbName] : null;
+                        if (fbObj) {
+                            gl.bindFramebuffer(gl.FRAMEBUFFER, fbObj.fb);
+                            // 프레임버퍼 텍스처 크기에 맞게 뷰포트 조절
+                            gl.viewport(0, 0, fbObj.width, fbObj.height);
+                        }
+                    }
+
+                    return script.callReturn();
+                }
+            );
+                    // [추가 기능] 자동 시간 유니폼(u_time) 업데이트 블록
+            addBlock(
+                'webgl_set_time_uniform',
+                '프로그램 %1 의 유니폼 %2 에 현재 시간(u_time) 설정 %3',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['my_program'] }, { type: 'text', params: ['u_time'] }, null
+                    ],
+                    map: { PROG_NAME: 0, UNIFORM_NAME: 1 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const progName = script.getStringValue('PROG_NAME');
+                    const uniformName = script.getStringValue('UNIFORM_NAME');
+
+                    const program = state.programs[progName];
+                    if (program) {
+                        gl.useProgram(program);
+
+                        const cacheKey = `${progName}_${uniformName}`;
+                        let loc = state.uniforms[cacheKey];
+                        if (loc === undefined) {
+                            loc = gl.getUniformLocation(program, uniformName);
+                            state.uniforms[cacheKey] = loc;
+                        }
+
+                        if (loc !== null) {
+                            // 현재 시간을 초 단위(seconds)로 변환하여 유니폼에 전달
+                            const timeInSeconds = performance.now() / 1000.0;
+                            gl.uniform1f(loc, timeInSeconds);
+                        }
+                    }
+                    return script.callReturn();
+                }
+            );
+
             const webglBlocks = [
                 'webgl_destroy_context', // 새로 추가된 초기화 블록 등록
                 'webgl_init_context', 'webgl_clear_color', 'webgl_clear',
                 'webgl_create_program_glsl', 'webgl_create_buffer_data',
                 'webgl_bind_attribute', 'webgl_draw_arrays',
                 'webgl_create_index_buffer_data', 'webgl_bind_index_buffer', 'webgl_draw_elements',
-                'webgl_set_uniform', 'webgl_toggle_depth_test',
+                'webgl_set_uniform', 'webgl_set_time_uniform', 'webgl_toggle_depth_test', // 여기에 추가됨
                 'webgl_load_texture', 'webgl_bind_texture'
             ];
 
@@ -722,7 +870,7 @@
                 }
             }
 
-            console.log('[WebGL Extension] 유니폼, 깊이 테스트, 인덱스 버퍼, 텍스처 포함 모든 WebGL 블록 주입 완료!');
+            console.log('[WebGL Extension] 프레임버퍼 기능이 포함된 모든 WebGL 블록 주입 완료!');
         }, 500);
     }
 
