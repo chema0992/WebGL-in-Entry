@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         엔트리 WebGL 비공식 블록 확장
 // @namespace    http://tampermonkey.net/
-// @version      2.1
+// @version      2.7
 // @description  엔트리 작품 만들기 및 상세 페이지에서 Raw WebGL 블록을 사용할 수 있게 해줍니다.
 // @author       Entry User
 // @match        *://playentry.org/*
@@ -734,7 +734,7 @@
                 }
             );
 
-            // [추가 기능] 프레임버퍼 바인딩(사용) 블록
+            
             addBlock(
                 'webgl_bind_framebuffer',
                 '그리기 화면을 프레임버퍼 %1 (으)로 변경 (기본 캔버스는 "기본" 입력) %2',
@@ -898,6 +898,7 @@
             );
 
 
+
             addBlock(
                 'webgl_make_perspective_matrix',
                 '원근 투영 시야각(FOV):%1 비율(W/H):%2 최소거리:%3 최대거리:%4',
@@ -1018,7 +1019,7 @@
                 }
             );
 
-            // [추가 기능] 뷰포트(Viewport) 설정 블록
+
             addBlock(
                 'webgl_set_viewport',
                 '뷰포트 설정 X:%1 Y:%2 너비:%3 높이:%4 %5',
@@ -1057,6 +1058,305 @@
                 }
             );
 
+            // [추가 기능] LookAt 카메라(View) 행렬 생성 블록
+            addBlock(
+                'webgl_make_lookat_matrix',
+                '카메라 위치 Eye(X:%1 Y:%2 Z:%3) Target(X:%4 Y:%5 Z:%6) Up(X:%7 Y:%8 Z:%9)',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' }
+                    ],
+                    def: [
+                        { type: 'text', params: ['0'] }, { type: 'text', params: ['0'] }, { type: 'text', params: ['5'] },   // Eye (카메라 위치)
+                        { type: 'text', params: ['0'] }, { type: 'text', params: ['0'] }, { type: 'text', params: ['0'] },   // Target (바라보는 목표)
+                        { type: 'text', params: ['0'] }, { type: 'text', params: ['1'] }, { type: 'text', params: ['0'] }    // Up (상단 방향)
+                    ],
+                    map: { EX: 0, EY: 1, EZ: 2, TX: 3, TY: 4, TZ: 5, UX: 6, UY: 7, UZ: 8 }
+                },
+                'text',
+                (sprite, script) => {
+                    const ex = parseFloat(script.getNumberValue('EX') || 0);
+                    const ey = parseFloat(script.getNumberValue('EY') || 0);
+                    const ez = parseFloat(script.getNumberValue('EZ') || 5);
+
+                    const tx = parseFloat(script.getNumberValue('TX') || 0);
+                    const ty = parseFloat(script.getNumberValue('TY') || 0);
+                    const tz = parseFloat(script.getNumberValue('TZ') || 0);
+
+                    const ux = parseFloat(script.getNumberValue('UX') || 0);
+                    const uy = parseFloat(script.getNumberValue('UY') || 1);
+                    const uz = parseFloat(script.getNumberValue('UZ') || 0);
+
+                    // 벡터 기초 연산 함수
+                    const subtract = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+                    const normalize = (v) => {
+                        const len = Math.hypot(v[0], v[1], v[2]);
+                        return len > 0.00001 ? [v[0] / len, v[1] / len, v[2] / len] : [0, 0, 0];
+                    };
+                    const cross = (a, b) => [
+                        a[1] * b[2] - a[2] * b[1],
+                        a[2] * b[0] - a[0] * b[2],
+                        a[0] * b[1] - a[1] * b[0]
+                    ];
+                    const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+                    const eye = [ex, ey, ez];
+                    const target = [tx, ty, tz];
+                    const up = [ux, uy, uz];
+
+                    // Z축 (카메라가 바라보는 방향의 반대)
+                    let z = normalize(subtract(eye, target));
+                    // X축 (오른쪽 방향)
+                    let x = normalize(cross(up, z));
+                    // Y축 (위쪽 방향)
+                    let y = cross(z, x);
+
+                    // WebGL용 4x4 열 우선(Column-major) LookAt 행렬 계산
+                    const out = [
+                        x[0], y[0], z[0], 0,
+                        x[1], y[1], z[1], 0,
+                        x[2], y[2], z[2], 0,
+                        -dot(x, eye), -dot(y, eye), -dot(z, eye), 1
+                    ];
+
+                    return out.map(v => (Math.abs(v) < 1e-6 ? 0 : v).toFixed(4)).join(', ');
+                },
+                'basic_string_field' // 값을 반환하는 둥근 블록 형태
+            );
+
+            // [추가 기능] 텍스처 필터링 및 래핑 옵션 설정 블록
+            addBlock(
+                'webgl_set_texture_params',
+                '텍스처 %1 옵션 설정 (축소:%2 확대:%3 S축:%4 T축:%5) %6',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' },
+                        {
+                            type: 'Dropdown',
+                            options: [
+                                ['LINEAR (부드럽게)', 'LINEAR'],
+                                ['NEAREST (픽셀아트)', 'NEAREST'],
+                                ['LINEAR_MIPMAP_LINEAR (고품질 밉맵)', 'LINEAR_MIPMAP_LINEAR'],
+                                ['NEAREST_MIPMAP_NEAREST (선명한 밉맵)', 'NEAREST_MIPMAP_NEAREST']
+                            ],
+                            value: 'LINEAR',
+                            fontSize: 11,
+                            bgColor: '#732D91',
+                            arrowColor: '#FFFFFF'
+                        },
+                        {
+                            type: 'Dropdown',
+                            options: [
+                                ['LINEAR (부드럽게)', 'LINEAR'],
+                                ['NEAREST (픽셀아트)', 'NEAREST']
+                            ],
+                            value: 'LINEAR',
+                            fontSize: 11,
+                            bgColor: '#732D91',
+                            arrowColor: '#FFFFFF'
+                        },
+                        {
+                            type: 'Dropdown',
+                            options: [
+                                ['CLAMP_TO_EDGE (끝부분 연장)', 'CLAMP_TO_EDGE'],
+                                ['REPEAT (바둑판 반복)', 'REPEAT'],
+                                ['MIRRORED_REPEAT (반전 반복)', 'MIRRORED_REPEAT']
+                            ],
+                            value: 'CLAMP_TO_EDGE',
+                            fontSize: 11,
+                            bgColor: '#732D91',
+                            arrowColor: '#FFFFFF'
+                        },
+                        {
+                            type: 'Dropdown',
+                            options: [
+                                ['CLAMP_TO_EDGE (끝부분 연장)', 'CLAMP_TO_EDGE'],
+                                ['REPEAT (바둑판 반복)', 'REPEAT'],
+                                ['MIRRORED_REPEAT (반전 반복)', 'MIRRORED_REPEAT']
+                            ],
+                            value: 'CLAMP_TO_EDGE',
+                            fontSize: 11,
+                            bgColor: '#732D91',
+                            arrowColor: '#FFFFFF'
+                        },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['tex_0'] },
+                        null, null, null, null, null
+                    ],
+                    map: { TEX_NAME: 0, MIN_FILTER: 1, MAG_FILTER: 2, WRAP_S: 3, WRAP_T: 4 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const texName = script.getStringValue('TEX_NAME');
+                    const texture = state.textures ? state.textures[texName] : null;
+
+                    if (texture) {
+                        gl.bindTexture(gl.TEXTURE_2D, texture);
+
+                        const minF = script.getField('MIN_FILTER', script);
+                        const magF = script.getField('MAG_FILTER', script);
+                        const wrapS = script.getField('WRAP_S', script);
+                        const wrapT = script.getField('WRAP_T', script);
+
+                        if (gl[minF]) gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl[minF]);
+                        if (gl[magF]) gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl[magF]);
+                        if (gl[wrapS]) gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl[wrapS]);
+                        if (gl[wrapT]) gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl[wrapT]);
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            // [추가 기능] 직교 투영(Orthographic) 행렬 생성 블록
+            addBlock(
+                'webgl_make_ortho_matrix',
+                '직교 투영 행렬 Left:%1 Right:%2 Bottom:%3 Top:%4 Near:%5 Far:%6',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' }
+                    ],
+                    def: [
+                        { type: 'text', params: ['-1.0'] }, { type: 'text', params: ['1.0'] },
+                        { type: 'text', params: ['-1.0'] }, { type: 'text', params: ['1.0'] },
+                        { type: 'text', params: ['0.1'] }, { type: 'text', params: ['100.0'] }
+                    ],
+                    map: { LEFT: 0, RIGHT: 1, BOTTOM: 2, TOP: 3, NEAR: 4, FAR: 5 }
+                },
+                'text',
+                (sprite, script) => {
+                    const left = parseFloat(script.getNumberValue('LEFT') || -1.0);
+                    const right = parseFloat(script.getNumberValue('RIGHT') || 1.0);
+                    const bottom = parseFloat(script.getNumberValue('BOTTOM') || -1.0);
+                    const top = parseFloat(script.getNumberValue('TOP') || 1.0);
+                    const near = parseFloat(script.getNumberValue('NEAR') || 0.1);
+                    const far = parseFloat(script.getNumberValue('FAR') || 100.0);
+
+                    const lr = 1.0 / (left - right);
+                    const bt = 1.0 / (bottom - top);
+                    const nf = 1.0 / (near - far);
+
+                    let out = new Array(16).fill(0);
+                    out[0] = -2.0 * lr;
+                    out[5] = -2.0 * bt;
+                    out[10] = 2.0 * nf;
+                    out[12] = (left + right) * lr;
+                    out[13] = (top + bottom) * bt;
+                    out[14] = (far + near) * nf;
+                    out[15] = 1.0;
+
+                    return out.map(v => (Math.abs(v) < 1e-6 ? 0 : v).toFixed(4)).join(', ');
+                },
+                'basic_string_field' // 값을 반환하는 둥근 블록 형태
+            );
+
+            // [추가 기능] 깊이 마스크 및 깊이 비교 함수 설정 블록
+            addBlock(
+                'webgl_set_depth_mask_func',
+                '깊이 버퍼 쓰기 %1 깊이 비교 함수 %2 %3',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        {
+                            type: 'Dropdown',
+                            options: [['켜기 (ON)', 'ON'], ['끄기 (OFF)', 'OFF']],
+                            value: 'ON',
+                            fontSize: 11,
+                            bgColor: '#732D91',
+                            arrowColor: '#FFFFFF'
+                        },
+                        {
+                            type: 'Dropdown',
+                            options: [
+                                ['LEQUAL (작거나 같음 - 기본값)', 'LEQUAL'],
+                                ['LESS (작음)', 'LESS'],
+                                ['EQUAL (같음)', 'EQUAL'],
+                                ['GEQUAL (크거나 같음)', 'GEQUAL'],
+                                ['GREATER (크음)', 'GREATER'],
+                                ['NOTEQUAL (같지 않음)', 'NOTEQUAL'],
+                                ['ALWAYS (항상 통과)', 'ALWAYS'],
+                                ['NEVER (항상 거부)', 'NEVER']
+                            ],
+                            value: 'LEQUAL',
+                            fontSize: 11,
+                            bgColor: '#732D91',
+                            arrowColor: '#FFFFFF'
+                        },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [null, null, null],
+                    map: { MASK: 0, FUNC: 1 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const maskVal = script.getField('MASK', script);
+                    const funcVal = script.getField('FUNC', script);
+
+                    // 깊이 버퍼 기록 여부 설정 (반투명 물체 렌더링 시 OFF 활용)
+                    gl.depthMask(maskVal === 'ON');
+
+                    // 깊이 비교 조건 설정
+                    if (gl[funcVal] !== undefined) {
+                        gl.depthFunc(gl[funcVal]);
+                    }
+
+                    return script.callReturn();
+                }
+            );
+
+            // [추가 기능] 화면 픽셀 색상 읽기 블록 (3D 피킹/클릭 감지용)
+            addBlock(
+                'webgl_read_pixels',
+                '화면 픽셀 색상 읽기 X:%1 Y:%2 (RGB)',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }
+                    ],
+                    def: [
+                        { type: 'text', params: ['0'] },
+                        { type: 'text', params: ['0'] }
+                    ],
+                    map: { X: 0, Y: 1 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl || !state.canvas) return '0, 0, 0';
+
+                    const gl = state.gl;
+                    const x = parseInt(script.getNumberValue('X') || 0, 10);
+                    const entryY = parseInt(script.getNumberValue('Y') || 0, 10);
+
+                    // WebGL은 Y축 좌표가 아래에서 위로 올라가므로 캔버스 높이 기준으로 반전합니다.
+                    const glY = state.canvas.height - entryY - 1;
+
+                    const pixel = new Uint8Array(4);
+                    gl.readPixels(x, glY, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+
+                    // R, G, B 값을 쉼표로 연결하여 반환 (예: "255, 0, 128")
+                    return `${pixel[0]}, ${pixel[1]}, ${pixel[2]}`;
+                },
+                'basic_string_field' // 값을 반환하는 둥근 블록 형태
+            );
+
             const webglBlocks = [
                 'webgl_destroy_context',
                 'webgl_init_context', 'webgl_clear_color', 'webgl_clear',
@@ -1068,9 +1368,14 @@
                 'webgl_create_framebuffer', 'webgl_bind_framebuffer',
                 'webgl_make_transform_matrix',
                 'webgl_make_perspective_matrix',
+                'webgl_make_lookat_matrix',
+                'webgl_make_ortho_matrix',
                 'webgl_toggle_blend',
                 'webgl_toggle_cull_face',
-                'webgl_set_viewport'        // <-- 추가된 뷰포트 블록
+                'webgl_set_viewport',
+                'webgl_set_texture_params',
+                'webgl_set_depth_mask_func', // <-- 추가
+                'webgl_read_pixels'          // <-- 추가
             ];
 
             if (EntryStatic && typeof EntryStatic.getAllBlocks === 'function') {
