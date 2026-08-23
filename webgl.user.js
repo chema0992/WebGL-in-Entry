@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         엔트리 WebGL 비공식 블록 확장
 // @namespace    http://tampermonkey.net/
-// @version      2.7
+// @version      3.0
 // @description  엔트리 작품 만들기 및 상세 페이지에서 Raw WebGL 블록을 사용할 수 있게 해줍니다.
 // @author       Entry User
 // @match        *://playentry.org/*
@@ -1357,6 +1357,155 @@
                 'basic_string_field' // 값을 반환하는 둥근 블록 형태
             );
 
+            // [추가 기능] 버퍼 삭제 블록
+            addBlock(
+                'webgl_delete_buffer',
+                '버퍼 %1 삭제 %2',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [{ type: 'text', params: ['buf_0'] }, null],
+                    map: { BUF_NAME: 0 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const bufName = script.getStringValue('BUF_NAME');
+                    if (state.buffers && state.buffers[bufName]) {
+                        state.gl.deleteBuffer(state.buffers[bufName]);
+                        delete state.buffers[bufName];
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            // [추가 기능] 텍스처 삭제 블록
+            addBlock(
+                'webgl_delete_texture',
+                '텍스처 %1 삭제 %2',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [{ type: 'text', params: ['tex_0'] }, null],
+                    map: { TEX_NAME: 0 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const texName = script.getStringValue('TEX_NAME');
+                    if (state.textures && state.textures[texName]) {
+                        state.gl.deleteTexture(state.textures[texName]);
+                        delete state.textures[texName];
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            // [추가 기능] 셰이더 프로그램 삭제 블록
+            addBlock(
+                'webgl_delete_program',
+                '셰이더 프로그램 %1 삭제 %2',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [{ type: 'text', params: ['prog_0'] }, null],
+                    map: { PROG_NAME: 0 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const progName = script.getStringValue('PROG_NAME');
+                    if (state.programs && state.programs[progName]) {
+                        state.gl.deleteProgram(state.programs[progName]);
+                        delete state.programs[progName];
+                    }
+                    return script.callReturn();
+                }
+            );
+
+            // [추가 기능] 블렌딩 혼합 계수 설정 블록 (gl.blendFunc)
+            addBlock(
+                'webgl_set_blend_func',
+                '혼합 방정식 계수 설정 (Source:%1 Destination:%2) %3',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        {
+                            type: 'Dropdown',
+                            options: [
+                                ['SRC_ALPHA (소스 알파 - 기본값)', 'SRC_ALPHA'],
+                                ['ONE (100% 반영)', 'ONE'],
+                                ['ZERO (반영 안함)', 'ZERO'],
+                                ['ONE_MINUS_SRC_ALPHA (알파 반전)', 'ONE_MINUS_SRC_ALPHA'],
+                                ['DST_COLOR (대상 색상)', 'DST_COLOR'],
+                                ['ONE_MINUS_DST_COLOR (대상 색상 반전)', 'ONE_MINUS_DST_COLOR'],
+                                ['SRC_COLOR (소스 색상)', 'SRC_COLOR'],
+                                ['ONE_MINUS_SRC_COLOR (소스 색상 반전)', 'ONE_MINUS_SRC_COLOR'],
+                                ['DST_ALPHA (대상 알파)', 'DST_ALPHA'],
+                                ['ONE_MINUS_DST_ALPHA (대상 알파 반전)', 'ONE_MINUS_DST_ALPHA'],
+                                ['SRC_ALPHA_SATURATE (알파 포화)', 'SRC_ALPHA_SATURATE']
+                            ],
+                            value: 'SRC_ALPHA',
+                            fontSize: 11,
+                            bgColor: '#732D91',
+                            arrowColor: '#FFFFFF'
+                        },
+                        {
+                            type: 'Dropdown',
+                            options: [
+                                ['ONE_MINUS_SRC_ALPHA (알파 반전 - 기본값)', 'ONE_MINUS_SRC_ALPHA'],
+                                ['ONE (가산 혼합/빛 표현)', 'ONE'],
+                                ['ZERO (기존 배경 무시)', 'ZERO'],
+                                ['SRC_ALPHA (소스 알파)', 'SRC_ALPHA'],
+                                ['DST_COLOR (대상 색상)', 'DST_COLOR'],
+                                ['ONE_MINUS_DST_COLOR (대상 색상 반전)', 'ONE_MINUS_DST_COLOR'],
+                                ['SRC_COLOR (소스 색상)', 'SRC_COLOR'],
+                                ['ONE_MINUS_SRC_COLOR (소스 색상 반전)', 'ONE_MINUS_SRC_COLOR'],
+                                ['DST_ALPHA (대상 알파)', 'DST_ALPHA'],
+                                ['ONE_MINUS_DST_ALPHA (대상 알파 반전)', 'ONE_MINUS_DST_ALPHA']
+                            ],
+                            value: 'ONE_MINUS_SRC_ALPHA',
+                            fontSize: 11,
+                            bgColor: '#732D91',
+                            arrowColor: '#FFFFFF'
+                        },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [null, null, null],
+                    map: { SFAC: 0, DFAC: 1 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const sfacVal = script.getField('SFAC', script);
+                    const dfacVal = script.getField('DFAC', script);
+
+                    if (gl[sfacVal] !== undefined && gl[dfacVal] !== undefined) {
+                        gl.blendFunc(gl[sfacVal], gl[dfacVal]);
+                    }
+
+                    return script.callReturn();
+                }
+            );
+
             const webglBlocks = [
                 'webgl_destroy_context',
                 'webgl_init_context', 'webgl_clear_color', 'webgl_clear',
@@ -1374,9 +1523,14 @@
                 'webgl_toggle_cull_face',
                 'webgl_set_viewport',
                 'webgl_set_texture_params',
-                'webgl_set_depth_mask_func', // <-- 추가
-                'webgl_read_pixels'          // <-- 추가
+                'webgl_set_depth_mask_func',
+                'webgl_read_pixels',
+                'webgl_delete_buffer',
+                'webgl_delete_texture',
+                'webgl_delete_program',
+                'webgl_set_blend_func' // <-- 추가
             ];
+
 
             if (EntryStatic && typeof EntryStatic.getAllBlocks === 'function') {
                 const originalGetAllBlocks = EntryStatic.getAllBlocks;
