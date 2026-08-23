@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         엔트리 WebGL 비공식 블록 확장
 // @namespace    http://tampermonkey.net/
-// @version      2.0
+// @version      2.1
 // @description  엔트리 작품 만들기 및 상세 페이지에서 Raw WebGL 블록을 사용할 수 있게 해줍니다.
 // @author       Entry User
 // @match        *://playentry.org/*
@@ -124,8 +124,8 @@
             addBlock(
                 'webgl_init_context',
                 'WebGL 캔버스 시작하기 %1',
-                { color: '#8E44AD', outerLine: '#732D91' },
-                { params: [{ type: 'Indicator', img: '', size: 11 }], def: [null], map: {} },
+                { color: '#15be59ff', outerLine: '#732D91' },
+                { params: [{ type: 'Indicator', img: 'block_icon/start_icon_play.svg', size: 11 }], def: [null], map: {} },
                 'text',
                 (sprite, script) => {
                     if (!targetWindow.__ENTRY_WEBGL__.canvas) {
@@ -205,7 +205,7 @@
             addBlock(
                 'webgl_create_program_glsl',
                 'WebGL 프로그램 %1 생성 (버텍스 GLSL: %2 , 프래그먼트 GLSL: %3)',
-                { color: '#8E44AD', outerLine: '#732D91' },
+                { color: '#104ec0ff', outerLine: '#732D91' },
                 {
                     params: [
                         { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
@@ -980,7 +980,6 @@
                 }
             );
 
-            // [추가 기능] 뒷면 숨기기(Culling) 설정 블록
             addBlock(
                 'webgl_toggle_cull_face',
                 '뒷면 숨기기(컬링) %1 %2',
@@ -1019,6 +1018,45 @@
                 }
             );
 
+            // [추가 기능] 뷰포트(Viewport) 설정 블록
+            addBlock(
+                'webgl_set_viewport',
+                '뷰포트 설정 X:%1 Y:%2 너비:%3 높이:%4 %5',
+                { color: '#8E44AD', outerLine: '#732D91' },
+                {
+                    params: [
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Block', accept: 'string' }, { type: 'Block', accept: 'string' },
+                        { type: 'Indicator', img: '', size: 11 }
+                    ],
+                    def: [
+                        { type: 'text', params: ['0'] }, { type: 'text', params: ['0'] },
+                        { type: 'text', params: ['640'] }, { type: 'text', params: ['360'] }, null
+                    ],
+                    map: { X: 0, Y: 1, WIDTH: 2, HEIGHT: 3 }
+                },
+                'text',
+                (sprite, script) => {
+                    const state = targetWindow.__ENTRY_WEBGL__;
+                    if (!state || !state.gl) return script.callReturn();
+
+                    const gl = state.gl;
+                    const x = parseInt(script.getNumberValue('X') || 0, 10);
+                    const y = parseInt(script.getNumberValue('Y') || 0, 10);
+
+                    let w = parseInt(script.getNumberValue('WIDTH'), 10);
+                    let h = parseInt(script.getNumberValue('HEIGHT'), 10);
+
+                    // 너비나 높이가 비정상적일 경우 기본 캔버스 크기를 사용합니다.
+                    if (isNaN(w) || w <= 0) w = state.canvas ? state.canvas.width : 640;
+                    if (isNaN(h) || h <= 0) h = state.canvas ? state.canvas.height : 360;
+
+                    gl.viewport(x, y, w, h);
+
+                    return script.callReturn();
+                }
+            );
+
             const webglBlocks = [
                 'webgl_destroy_context',
                 'webgl_init_context', 'webgl_clear_color', 'webgl_clear',
@@ -1030,8 +1068,9 @@
                 'webgl_create_framebuffer', 'webgl_bind_framebuffer',
                 'webgl_make_transform_matrix',
                 'webgl_make_perspective_matrix',
-                'webgl_toggle_blend',       // <-- 추가된 블렌딩 블록
-                'webgl_toggle_cull_face'    // <-- 추가된 컬링 블록
+                'webgl_toggle_blend',
+                'webgl_toggle_cull_face',
+                'webgl_set_viewport'        // <-- 추가된 뷰포트 블록
             ];
 
             if (EntryStatic && typeof EntryStatic.getAllBlocks === 'function') {
