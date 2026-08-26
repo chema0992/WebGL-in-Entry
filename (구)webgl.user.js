@@ -2,7 +2,7 @@
 // @name         엔트리 WebGL 비공식 블록 확장
 // @namespace    http://tampermonkey.net/
 // @version      3.0
-// @description  엔트리 작품 만들기 및 상세 페이지에서 Raw WebGL 블록을 사용할 수 있게 해줍니다.
+// @description  엔트리 작품 만들기 및 상세 페이지에서 Raw WebGL 블록을 사용할 수 있게 해줍니다. (모듈화 이전 백업본)
 // @author       Entry User
 // @match        *://playentry.org/*
 // @grant        none
