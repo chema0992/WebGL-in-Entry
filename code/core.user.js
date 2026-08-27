@@ -109,7 +109,7 @@
                             $elem.css({
                                 'background-color': cat.color || '#8E44AD',
                                 'color': cat.fontColor || '#ffffff',
-                                'width': '50',
+                                'width': '50', // 고정 너비 스타일 강제 해제하여 엔트리 기본 폭 유지
                                 'box-sizing': 'border-box'
                             });
                         }
