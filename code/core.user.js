@@ -109,7 +109,7 @@
                             $elem.css({
                                 'background-color': cat.color || '#8E44AD',
                                 'color': cat.fontColor || '#ffffff',
-                                'width': '65',
+                                'width': '50',
                                 'box-sizing': 'border-box'
                             });
                         }
